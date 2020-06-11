@@ -1,0 +1,13 @@
+[package]
+name = "porcupine"
+version = "0.1.0"
+authors = ["not_a_seagull <jtnunley01@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+bitflags = "1.2"
+bytemuck = "1.2"
+euclid = "0.20"
+lazy_static = "1"
+thiserror = "1"
+winapi = { version = "0.3", features = ["errhandlingapi", "impl-debug", "minwindef", "std", "winbase", "windef", "wingdi", "winuser", "wingdi"] }
