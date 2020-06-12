@@ -43,7 +43,7 @@
  * ----------------------------------------------------------------------------------
  */
 
-use crate::{WStr, WString};
+use crate::{DeviceContext, WStr, WString};
 use euclid::default::Rect;
 use std::{
     fmt, mem,
@@ -422,5 +422,11 @@ impl Window {
         } else {
             Ok(())
         }
+    }
+
+    /// Begin painting ops on this window.
+    #[inline]
+    pub fn begin_paint(&self) -> crate::Result<DeviceContext> {
+        DeviceContext::begin_paint(self)
     }
 }

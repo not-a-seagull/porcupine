@@ -46,10 +46,9 @@
 use crate::DeviceContext;
 use euclid::default::Size2D;
 use std::{
-    boxed::Box,
     ffi::c_void,
     mem,
-    os::raw::c_int,
+    os::raw::{c_int, c_long},
     ptr::NonNull,
     sync::{atomic::AtomicPtr, Arc, Mutex, Weak},
 };
@@ -70,11 +69,7 @@ pub struct Bitmap {
 impl Drop for Bitmap {
     fn drop(&mut self) {
         // drop the owning dc before anything else
-        mem::drop(
-            self.owning_dc
-                .take()
-                .expect(OWNING_DC_NONE),
-        );
+        mem::drop(self.owning_dc.take().expect(OWNING_DC_NONE));
 
         if let Ok(mut l) = self.hbitmap.lock() {
             unsafe { wingdi::DeleteObject(*l.get_mut() as *mut c_void) };
@@ -82,37 +77,13 @@ impl Drop for Bitmap {
     }
 }
 
-/// Data format of bytes passed into bitmap creation functions.
-#[repr(u8)]
-pub enum DataFormat {
-    Rgb = 24,
-    Rgba,
-}
-
-impl DataFormat {
-    #[inline]
-    pub fn retain_elem(&self, byte: BYTE, index: usize) -> bool {
-        match *self {
-            Self::Rgb => true,
-            Self::Rgba => (index + 1) % 4 != 0,
-        }
-    }
-}
-
 impl Bitmap {
-    /// Create a new bitmap from size and raw data.
+    /// Create a new bitmap from size and raw data. Data is expected to be raw RGB bytes.
     pub fn from_dc_and_data(
         dc: &DeviceContext,
         size: Size2D<c_int>,
         data: &[BYTE],
-        format: DataFormat,
     ) -> crate::Result<Self> {
-        let data = data
-            .iter()
-            .enumerate()
-            .filter(|(i, x)| format.retain_elem(**x, *i))
-            .map(|(_i, x)| *x)
-            .collect::<Vec<BYTE>>();
         let hbitmap = unsafe {
             wingdi::CreateBitmap(
                 size.width,
@@ -164,6 +135,20 @@ impl Bitmap {
         let ptr = *p.get_mut();
         debug_assert!(!ptr.is_null());
         unsafe { NonNull::new_unchecked(ptr) }
+    }
+
+    /// Get the internal device context.
+    pub fn dc(&self) -> &DeviceContext {
+        self.owning_dc.as_ref().unwrap()
+    }
+
+    /// Get the width of the internal image.
+    pub fn width(&self) -> c_long {
+        self.bm.bmWidth
+    }
+    /// Get the height of the internal image.
+    pub fn height(&self) -> c_long {
+        self.bm.bmHeight
     }
 
     /// Get a weak reference to this bitmap.

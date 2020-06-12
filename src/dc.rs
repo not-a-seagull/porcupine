@@ -50,18 +50,20 @@ use std::{
     mem,
     os::raw::c_int,
     ptr::{self, NonNull},
-    sync::{atomic::AtomicPtr, Mutex, RwLock, Weak},
+    sync::{atomic::AtomicPtr, Mutex, Weak},
 };
 use winapi::{
-    shared::windef::{HBITMAP__, HDC, HDC__, HWND__},
+    shared::{
+        minwindef::DWORD,
+        windef::{HBITMAP__, HDC__, HWND__},
+    },
     um::{
-        wingdi::{self, BITMAP},
+        wingdi,
         winuser::{self, PAINTSTRUCT},
     },
 };
 
 static MUTEX_HDC_PANIC: &'static str = "Unable to achieve lock on drawing context mutex";
-static MUTEX_HWND_PANIC: &'static str = "Unable to achieve lock on owner mutex";
 
 /// The direction an arc can go in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Hash)]
@@ -94,6 +96,7 @@ pub struct DeviceContext {
 }
 
 impl Drop for DeviceContext {
+    #[allow(unused_variables)]
     fn drop(&mut self) {
         // if we can't lock the mutex, don't bother
         if let Ok(mut hdc) = self.hdc.lock() {
@@ -127,6 +130,16 @@ impl Drop for DeviceContext {
             }
         }
     }
+}
+
+/// Operations for copying.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(u32)]
+pub enum CopyOperation {
+    SrcCopy = wingdi::SRCCOPY,
+    SrcAnd = wingdi::SRCAND,
+    SrcErase = wingdi::SRCERASE,
+    SrcPaint = wingdi::SRCPAINT,
 }
 
 impl DeviceContext {
@@ -197,6 +210,34 @@ impl DeviceContext {
         let mut p = self.hdc.lock().expect(MUTEX_HDC_PANIC);
         let ptr = *p.get_mut();
         unsafe { NonNull::new_unchecked(ptr) }
+    }
+
+    /// Copy data from one DC to another, using BitBlt.
+    pub fn copy_from(
+        &self,
+        source: &Self,
+        source_rect: Rect<c_int>,
+        dest_pt: Point2D<c_int>,
+        op: CopyOperation,
+    ) -> crate::Result<()> {
+        if unsafe {
+            wingdi::BitBlt(
+                self.hdc().as_mut(),
+                dest_pt.x,
+                dest_pt.y,
+                source_rect.size.width,
+                source_rect.size.height,
+                source.hdc().as_mut(),
+                source_rect.origin.x,
+                source_rect.origin.y,
+                op as DWORD,
+            )
+        } == 0
+        {
+            Err(crate::win32_error(crate::Win32Function::BitBlt))
+        } else {
+            Ok(())
+        }
     }
 
     /// Move this DC to a coordinate point.

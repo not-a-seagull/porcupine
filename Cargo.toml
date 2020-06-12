@@ -9,5 +9,6 @@ bitflags = "1.2"
 bytemuck = "1.2"
 euclid = "0.20"
 lazy_static = "1"
+porcupine_constant_wide = { path = "./porcupine_constant_wide" }
 thiserror = "1"
 winapi = { version = "0.3", features = ["errhandlingapi", "impl-debug", "minwindef", "std", "winbase", "windef", "wingdi", "winuser", "wingdi"] }

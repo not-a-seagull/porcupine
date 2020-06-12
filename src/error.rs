@@ -79,6 +79,7 @@ pub enum Win32Function {
     CreateCompatibleDC,
     CreateBitmap,
     GetObjectW,
+    BitBlt,
     Other(&'static str),
 }
 
@@ -114,6 +115,7 @@ impl fmt::Display for Win32Function {
                 Self::CreateCompatibleDC => "CreateCompatibleDC",
                 Self::CreateBitmap => "CreateBitmap",
                 Self::GetObjectW => "GetObjectW",
+                Self::BitBlt => "BitBlt",
                 Self::Other(s) => s,
             }
         )
@@ -170,14 +172,6 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// Get the last Win32 error, if applicable.
 pub fn win32_error(function: Win32Function) -> Error {
     let error = unsafe { errhandlingapi::GetLastError() };
-
-    if error == 0 {
-        return Error::Win32 {
-            code: error,
-            message: "No error detected".to_string(),
-            function,
-        };
-    }
 
     const ERROR_BUFFER_SIZE: usize = 256;
     let mut error_buffer = Vec::with_capacity(ERROR_BUFFER_SIZE);

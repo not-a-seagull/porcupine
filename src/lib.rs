@@ -62,6 +62,9 @@ pub use module::*;
 pub use string::*;
 pub use window::*;
 
+pub use crate::constant_wide as L;
+pub use porcupine_constant_wide::constant_text as constant_wide;
+
 /// Utility function to convert Rust bool to BOOL
 #[inline]
 pub fn wboolify(rbool: bool) -> winapi::shared::minwindef::BOOL {
