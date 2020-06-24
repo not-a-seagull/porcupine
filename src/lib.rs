@@ -43,7 +43,7 @@
  * ----------------------------------------------------------------------------------
  */
 
-#![feature(const_raw_ptr_deref)]
+#![cfg(windows)]
 
 //! This is intended to be a safe Rust wrapper around the Win32 API, with an emphasis on the graphical WinUser
 //! part of the API.
@@ -52,20 +52,15 @@ pub mod bitmap;
 pub mod dc;
 mod error;
 pub mod module;
-pub mod string;
 pub mod window;
 
 pub use bitmap::*;
 pub use dc::*;
 pub use error::*;
 pub use module::*;
-pub use string::*;
 pub use window::*;
 
-pub use crate::constant_wide as L;
-pub use porcupine_constant_wide::constant_text as constant_wide;
-
-/// Utility function to convert Rust bool to BOOL
+/// Utility function to convert Rust bool to Win32 BOOL
 #[inline]
 pub fn wboolify(rbool: bool) -> winapi::shared::minwindef::BOOL {
     use winapi::shared::minwindef::{FALSE, TRUE};

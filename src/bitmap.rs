@@ -45,12 +45,13 @@
 
 use crate::DeviceContext;
 use euclid::default::Size2D;
+use parking_lot::Mutex;
 use std::{
     ffi::c_void,
-    mem,
+    mem::{self, MaybeUninit},
     os::raw::{c_int, c_long},
     ptr::NonNull,
-    sync::{atomic::AtomicPtr, Arc, Mutex, Weak},
+    sync::{atomic::AtomicPtr, Arc, Weak},
 };
 use winapi::{
     shared::{minwindef::BYTE, windef::HBITMAP__},
@@ -62,7 +63,7 @@ static OWNING_DC_NONE: &'static str = "Owning DC was not properly set";
 /// A bitmap.
 pub struct Bitmap {
     hbitmap: Arc<Mutex<AtomicPtr<HBITMAP__>>>,
-    owning_dc: Option<DeviceContext>, // only for coherence, this field should never be None
+    owning_dc: Option<DeviceContext>, // only for initialization. This field should never be None
     bm: BITMAP,
 }
 
@@ -71,9 +72,7 @@ impl Drop for Bitmap {
         // drop the owning dc before anything else
         mem::drop(self.owning_dc.take().expect(OWNING_DC_NONE));
 
-        if let Ok(mut l) = self.hbitmap.lock() {
-            unsafe { wingdi::DeleteObject(*l.get_mut() as *mut c_void) };
-        }
+        unsafe { wingdi::DeleteObject(*self.hbitmap.lock().get_mut() as *mut c_void) };
     }
 }
 
@@ -98,22 +97,22 @@ impl Bitmap {
             Err(crate::win32_error(crate::Win32Function::CreateBitmap))
         } else {
             // basic bm
-            let mut bm: BITMAP = unsafe { mem::zeroed() };
+            let mut bm: MaybeUninit<BITMAP> = MaybeUninit::zeroed();
             if unsafe {
-                wingdi::GetObjectW(
+                wingdi::GetObjectA(
                     hbitmap as *mut c_void,
                     mem::size_of::<BITMAP>() as c_int,
-                    &mut bm as *mut BITMAP as *mut c_void,
+                    bm.as_mut_ptr() as *mut c_void,
                 )
             } == 0
             {
-                return Err(crate::win32_error(crate::Win32Function::GetObjectW));
+                return Err(crate::win32_error(crate::Win32Function::GetObjectA));
             }
 
             let mut b = Self {
                 hbitmap: Arc::new(Mutex::new(AtomicPtr::new(hbitmap))),
                 owning_dc: None,
-                bm,
+                bm: unsafe { bm.assume_init() },
             };
 
             // set up a DC for drawing
@@ -128,10 +127,7 @@ impl Bitmap {
 
     /// Get the handle to a bitmap.
     pub fn hbitmap(&self) -> NonNull<HBITMAP__> {
-        let mut p = self
-            .hbitmap
-            .lock()
-            .expect("Unable to achieve lock on bitmap");
+        let mut p = self.hbitmap.lock();
         let ptr = *p.get_mut();
         debug_assert!(!ptr.is_null());
         unsafe { NonNull::new_unchecked(ptr) }

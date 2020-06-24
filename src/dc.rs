@@ -45,12 +45,13 @@
 
 use crate::{Bitmap, Window};
 use euclid::default::{Point2D, Rect};
+use parking_lot::Mutex;
 use std::{
     ffi::c_void,
-    mem,
+    mem::MaybeUninit,
     os::raw::c_int,
     ptr::{self, NonNull},
-    sync::{atomic::AtomicPtr, Mutex, Weak},
+    sync::{atomic::AtomicPtr, Weak},
 };
 use winapi::{
     shared::{
@@ -62,8 +63,6 @@ use winapi::{
         winuser::{self, PAINTSTRUCT},
     },
 };
-
-static MUTEX_HDC_PANIC: &'static str = "Unable to achieve lock on drawing context mutex";
 
 /// The direction an arc can go in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Hash)]
@@ -98,35 +97,31 @@ pub struct DeviceContext {
 impl Drop for DeviceContext {
     #[allow(unused_variables)]
     fn drop(&mut self) {
-        // if we can't lock the mutex, don't bother
-        if let Ok(mut hdc) = self.hdc.lock() {
-            // we need to release differently depending on how we were allocated
-            match self.kind {
-                DeviceContextType::Painter {
-                    ref owner,
-                    ref paint_struct,
-                } => {
-                    if let Some(o) = owner.upgrade() {
-                        if let Ok(mut parent) = o.lock() {
-                            // end the paint
-                            unsafe {
-                                winuser::EndPaint(*parent.get_mut(), paint_struct);
-                            };
-                        }
-                    }
+        let mut hdc = self.hdc.lock();
+        // we need to release differently depending on how we were allocated
+        match self.kind {
+            DeviceContextType::Painter {
+                ref owner,
+                ref paint_struct,
+            } => {
+                if let Some(o) = owner.upgrade() {
+                    let mut parent = o.lock();
+                    // end the paint
+                    unsafe {
+                        winuser::EndPaint(*parent.get_mut(), paint_struct);
+                    };
                 }
-                DeviceContextType::OwnsGDIObject {
-                    ref old_object,
-                    ref storage,
-                } => {
-                    if let Some(o) = old_object {
-                        if let Ok(mut l) = o.lock() {
-                            unsafe { wingdi::SelectObject(*hdc.get_mut(), *l.get_mut()) };
-                        }
-                    }
+            }
+            DeviceContextType::OwnsGDIObject {
+                ref old_object,
+                ref storage,
+            } => {
+                if let Some(o) = old_object {
+                    let mut l = o.lock();
+                    unsafe { wingdi::SelectObject(*hdc.get_mut(), *l.get_mut()) };
+                }
 
-                    unsafe { wingdi::DeleteDC(*hdc.get_mut()) };
-                }
+                unsafe { wingdi::DeleteDC(*hdc.get_mut()) };
             }
         }
     }
@@ -145,8 +140,8 @@ pub enum CopyOperation {
 impl DeviceContext {
     /// Start painting with a new DC.
     pub fn begin_paint(hwnd: &Window) -> crate::Result<Self> {
-        let mut ps: PAINTSTRUCT = unsafe { mem::zeroed() };
-        let hdc = unsafe { winuser::BeginPaint(hwnd.hwnd().as_mut(), &mut ps) };
+        let mut ps: MaybeUninit<PAINTSTRUCT> = MaybeUninit::zeroed();
+        let hdc = unsafe { winuser::BeginPaint(hwnd.hwnd().as_mut(), ps.as_mut_ptr()) };
 
         if hdc.is_null() {
             Err(crate::win32_error(crate::Win32Function::BeginPaint))
@@ -155,7 +150,7 @@ impl DeviceContext {
                 hdc: Mutex::new(AtomicPtr::new(hdc)),
                 kind: DeviceContextType::Painter {
                     owner: hwnd.weak_reference(),
-                    paint_struct: ps,
+                    paint_struct: unsafe { ps.assume_init() },
                 },
             })
         }
@@ -192,7 +187,7 @@ impl DeviceContext {
 
                 let old_ptr = unsafe {
                     wingdi::SelectObject(
-                        *self.hdc.lock().expect(MUTEX_HDC_PANIC).get_mut(),
+                        *self.hdc.lock().get_mut(),
                         bitmap.hbitmap().as_ptr() as *mut c_void,
                     )
                 };
@@ -207,8 +202,9 @@ impl DeviceContext {
 
     /// Get a handle to this DC.
     pub fn hdc(&self) -> NonNull<HDC__> {
-        let mut p = self.hdc.lock().expect(MUTEX_HDC_PANIC);
+        let mut p = self.hdc.lock();
         let ptr = *p.get_mut();
+        debug_assert!(!ptr.is_null());
         unsafe { NonNull::new_unchecked(ptr) }
     }
 

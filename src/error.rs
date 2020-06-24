@@ -43,7 +43,7 @@
  * ----------------------------------------------------------------------------------
  */
 
-use std::{convert::Infallible, fmt, ptr, string::FromUtf16Error};
+use std::{convert::Infallible, fmt, ptr, string::FromUtf8Error};
 use thiserror::Error;
 use winapi::{
     shared::minwindef::DWORD,
@@ -55,14 +55,14 @@ use winapi::{
 pub enum Win32Function {
     MultiByteToWideChar,
     WideCharToMultiByte,
-    GetModuleHandleExW,
-    UnregisterClassW,
-    RegisterClassExW,
-    GetClassInfoExW,
-    CreateWindowExW,
+    GetModuleHandleExA,
+    UnregisterClassA,
+    RegisterClassExA,
+    GetClassInfoExA,
+    CreateWindowExA,
     GetWindowPlacement,
     SetWindowPlacement,
-    SetWindowTextW,
+    SetWindowTextA,
     InvalidateRect,
     MoveToEx,
     LineTo,
@@ -78,7 +78,7 @@ pub enum Win32Function {
     BeginPaint,
     CreateCompatibleDC,
     CreateBitmap,
-    GetObjectW,
+    GetObjectA,
     BitBlt,
     Other(&'static str),
 }
@@ -91,14 +91,14 @@ impl fmt::Display for Win32Function {
             match *self {
                 Self::MultiByteToWideChar => "MultiByteToWideChar",
                 Self::WideCharToMultiByte => "WideCharToMultiByte",
-                Self::GetModuleHandleExW => "GetModuleHandleExW",
-                Self::UnregisterClassW => "UnregisterClassW",
-                Self::RegisterClassExW => "RegisterClassExW",
-                Self::GetClassInfoExW => "GetClassInfoExW",
-                Self::CreateWindowExW => "CreateWindowExW",
+                Self::GetModuleHandleExA => "GetModuleHandleExA",
+                Self::UnregisterClassA => "UnregisterClassA",
+                Self::RegisterClassExA => "RegisterClassExA",
+                Self::GetClassInfoExA => "GetClassInfoExA",
+                Self::CreateWindowExA => "CreateWindowExA",
                 Self::GetWindowPlacement => "GetWindowPlacement",
                 Self::SetWindowPlacement => "SetWindowPlacement",
-                Self::SetWindowTextW => "SetWindowTextW",
+                Self::SetWindowTextA => "SetWindowTextA",
                 Self::InvalidateRect => "InvalidateRect",
                 Self::MoveToEx => "MoveToEx",
                 Self::LineTo => "LineTo",
@@ -114,7 +114,7 @@ impl fmt::Display for Win32Function {
                 Self::BeginPaint => "BeginPaint",
                 Self::CreateCompatibleDC => "CreateCompatibleDC",
                 Self::CreateBitmap => "CreateBitmap",
-                Self::GetObjectW => "GetObjectW",
+                Self::GetObjectA => "GetObjectA",
                 Self::BitBlt => "BitBlt",
                 Self::Other(s) => s,
             }
@@ -136,15 +136,9 @@ pub enum Error {
         message: String,
         function: Win32Function,
     },
-    #[error("Unable to convert UTF-16 to Rust string: {0}")]
-    Utf16(#[from] FromUtf16Error),
+    #[error("Unable to convert UTF-8 to Rust string: {0}")]
+    Utf8(#[from] FromUtf8Error),
 
-    /// Attempted to create a wide string with a zero in the middle.
-    #[error("Attempted to create wide string with a zero.")]
-    WideStringNul,
-    /// Unable to get widestring slice.
-    #[error("Unable to create slice for WideString")]
-    LpcwstrFailed,
     /// Attempted to upgrade a dead Weak pointer.
     #[error("Attempted to upgrade a weak pointer that has since expired")]
     ExpiredWeakPtr,
@@ -177,7 +171,7 @@ pub fn win32_error(function: Win32Function) -> Error {
     let mut error_buffer = Vec::with_capacity(ERROR_BUFFER_SIZE);
 
     let len = unsafe {
-        FormatMessageW(
+        FormatMessageA(
             FORMAT_MESSAGE_IGNORE_INSERTS
                 | FORMAT_MESSAGE_FROM_SYSTEM
                 | FORMAT_MESSAGE_ARGUMENT_ARRAY,
@@ -200,19 +194,12 @@ pub fn win32_error(function: Win32Function) -> Error {
 
     unsafe { error_buffer.set_len(len as usize) };
 
-    match {
-        match crate::WStr::from_bytes(&error_buffer) {
-            Ok(b) => b,
-            Err(e) => return e,
-        }
-    }
-    .into_string()
-    {
+    match String::from_utf8(error_buffer.into_iter().map(|i| i as u8).collect()) {
         Ok(s) => Error::Win32 {
             code: error,
             message: s,
             function,
         },
-        Err(e) => e,
+        Err(e) => e.into(),
     }
 }

@@ -43,36 +43,36 @@
  * ----------------------------------------------------------------------------------
  */
 
-use crate::{DeviceContext, WStr, WString};
+use crate::DeviceContext;
 use euclid::default::Rect;
+use parking_lot::Mutex;
 use std::{
-    fmt, mem,
+    fmt,
+    mem::{self, MaybeUninit},
     os::raw::c_int,
     ptr::{self, NonNull},
-    sync::{atomic::AtomicPtr, Arc, Mutex, Weak},
+    sync::{atomic::AtomicPtr, Arc, Weak},
 };
 use winapi::{
     shared::{
         minwindef::{DWORD, FALSE, TRUE, UINT},
+        ntdef::LPCSTR,
         windef::HWND__,
     },
-    um::winuser::{self, WINDOWPLACEMENT, WNDCLASSEXW, WNDPROC},
+    um::winuser::{self, WINDOWPLACEMENT, WNDCLASSEXA, WNDPROC},
 };
-
-static LOCK_MUTEX_PANIC: &'static str = "Unable to lock module info mutex";
-static HWND_MUTEX_PANIC: &'static str = "Unable to achieve lock on window handle";
 
 /// An owned, modifyable window class.
 #[derive(Clone)]
 pub struct OwnedWindowClass {
-    inner: WNDCLASSEXW,
+    inner: WNDCLASSEXA,
     is_registered: bool,
-    class_name: Option<WString>,
+    class_name: String,
 }
 
 impl fmt::Debug for OwnedWindowClass {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let name = format!("OwnedWindowClass (\"{}\")", self.class_name()?);
+        let name = format!("OwnedWindowClass (\"{}\")", self.class_name());
         f.debug_struct(&name)
             .field("inner", &format_args!("Window Class Structure")) // TODO: fix to use Debug trait
             .field("is_registered", &self.is_registered)
@@ -83,40 +83,33 @@ impl fmt::Debug for OwnedWindowClass {
 
 impl OwnedWindowClass {
     /// Create a new WindowClass that has yet to be initialized.
-    pub fn new() -> Self {
-        let mut wc = Self {
-            inner: unsafe { mem::zeroed() },
+    pub fn new(name: String) -> Self {
+        let mut inner: MaybeUninit<WNDCLASSEXA> = MaybeUninit::zeroed();
+
+        // unsafe is needed here in order to set the inner struct's fields
+        unsafe {
+            (*inner.as_mut_ptr()).cbSize = mem::size_of::<WNDCLASSEXA>() as UINT;
+            (*inner.as_mut_ptr()).lpfnWndProc = Some(winuser::DefWindowProcW);
+            (*inner.as_mut_ptr()).hInstance = crate::MODULE_INFO.lock().handle().as_mut();
+            (*inner.as_mut_ptr()).lpszClassName = name.as_ptr() as LPCSTR;
+        }
+
+        Self {
+            inner: unsafe { inner.assume_init() },
             is_registered: false,
-            class_name: None,
-        };
-
-        wc.inner.cbSize = mem::size_of::<WNDCLASSEXW>() as UINT;
-        wc.inner.lpfnWndProc = Some(winuser::DefWindowProcW);
-        wc.inner.hInstance = unsafe {
-            crate::MODULE_INFO
-                .lock()
-                .expect(LOCK_MUTEX_PANIC)
-                .handle()
-                .as_mut()
-        };
-
-        wc
+            class_name: name,
+        }
     }
 
     /// Get the name of the class.
-    pub fn class_name_ws(&self) -> &WStr {
-        unsafe { WStr::from_ptr(self.inner.lpszClassName) }
-    }
-
-    /// Get the name of the class.
-    pub fn class_name(&self) -> crate::Result<String> {
-        self.class_name_ws().into_string()
+    pub fn class_name(&self) -> &str {
+        &self.class_name // guaranteed to be the class name
     }
 
     /// Set the name of the class.
-    pub fn set_class_name(&mut self, name: WString) -> crate::Result<()> {
-        self.inner.lpszClassName = name.as_ptr();
-        self.class_name = Some(name); // make sure name isn't dropped
+    pub fn set_class_name(&mut self, name: String) -> crate::Result<()> {
+        self.inner.lpszClassName = name.as_ptr() as LPCSTR;
+        self.class_name = name; // make sure name isn't dropped
 
         Ok(())
     }
@@ -142,55 +135,53 @@ impl OwnedWindowClass {
         // if this is an already registered class, unregister it
         if self.is_registered {
             if unsafe {
-                winuser::UnregisterClassW(
-                    self.class_name_ws().as_ptr(),
-                    crate::MODULE_INFO
-                        .lock()
-                        .expect(LOCK_MUTEX_PANIC)
-                        .handle()
-                        .as_mut(),
+                winuser::UnregisterClassA(
+                    self.class_name.as_ptr() as LPCSTR,
+                    crate::MODULE_INFO.lock().handle().as_mut(),
                 )
             } == 0
             {
-                return Err(crate::win32_error(crate::Win32Function::UnregisterClassW));
+                return Err(crate::win32_error(crate::Win32Function::UnregisterClassA));
             } else {
-                #[cfg(debug_assertions)]
-                {
-                    self.is_registered = false; // in the unlikely event of an error
-                }
+                self.is_registered = false; // in the unlikely event of an error
             }
         }
 
         // register the class
-        if unsafe { winuser::RegisterClassExW(&self.inner) } == 0 {
-            Err(crate::win32_error(crate::Win32Function::RegisterClassExW))
+        if unsafe { winuser::RegisterClassExA(&self.inner) } == 0 {
+            Err(crate::win32_error(crate::Win32Function::RegisterClassExA))
         } else {
             self.is_registered = true;
             Ok(())
         }
+    }
+
+    /// Get a class' information from its name.
+    pub fn from_name(name: String) -> Result<Self, (crate::Error, String)> {
+        unimplemented!()
     }
 }
 
 /// A window class; either a reference to a window class or a full, owned window class.
 pub trait WindowClass {
     /// Convert this item into the name of the class.
-    fn identifier(&self) -> &WStr;
+    fn identifier(&self) -> &str;
 }
 
 impl WindowClass for OwnedWindowClass {
-    fn identifier(&self) -> &WStr {
-        self.class_name_ws()
+    fn identifier(&self) -> &str {
+        self.class_name()
     }
 }
 
-impl WindowClass for WString {
-    fn identifier(&self) -> &WStr {
+impl WindowClass for String {
+    fn identifier(&self) -> &str {
         &*self
     }
 }
 
-impl WindowClass for WStr {
-    fn identifier(&self) -> &WStr {
+impl WindowClass for &str {
+    fn identifier(&self) -> &str {
         self
     }
 }
@@ -296,35 +287,34 @@ impl Window {
     /// Create a new window class.
     pub fn new<WC: WindowClass>(
         window_class: &WC,
-        window_name: &WStr,
+        window_name: &str,
         style: WindowStyle,
         extended_style: ExtendedWindowStyle,
         bounds: Rect<c_int>,
-        parent: &Self,
+        parent: Option<&Self>,
     ) -> crate::Result<Self> {
         let hwnd = unsafe {
-            winuser::CreateWindowExW(
+            winuser::CreateWindowExA(
                 extended_style.bits(),
-                window_class.identifier().as_ptr(),
-                window_name.as_ptr(),
+                window_class.identifier().as_ptr() as LPCSTR,
+                window_name.as_ptr() as LPCSTR,
                 style.bits(),
                 bounds.origin.x,
                 bounds.origin.y,
                 bounds.size.width,
                 bounds.size.height,
-                parent.hwnd().as_mut(),
+                match parent {
+                    Some(p) => p.hwnd().as_mut(),
+                    None => ptr::null_mut(),
+                },
                 ptr::null_mut(),
-                crate::MODULE_INFO
-                    .lock()
-                    .expect(LOCK_MUTEX_PANIC)
-                    .handle()
-                    .as_mut(),
+                crate::MODULE_INFO.lock().handle().as_mut(),
                 ptr::null_mut(),
             )
         };
 
         if hwnd.is_null() {
-            Err(crate::win32_error(crate::Win32Function::CreateWindowExW))
+            Err(crate::win32_error(crate::Win32Function::CreateWindowExA))
         } else {
             Ok(Self {
                 hwnd: Arc::new(Mutex::new(AtomicPtr::new(hwnd))),
@@ -338,8 +328,9 @@ impl Window {
     ///
     /// This function will panic if the internal mutex is unable to be locked.
     pub fn hwnd(&self) -> NonNull<HWND__> {
-        let mut p = self.hwnd.lock().expect(HWND_MUTEX_PANIC);
+        let mut p = self.hwnd.lock();
         let ptr = p.get_mut();
+        debug_assert!(!ptr.is_null());
         unsafe { NonNull::new_unchecked(*ptr) }
     }
 
@@ -350,13 +341,14 @@ impl Window {
     /// Change the bounds of this window.
     pub fn reshape(&self, rect: Rect<c_int>) -> crate::Result<()> {
         // create the window placement struct
-        let mut wp: WINDOWPLACEMENT = unsafe { mem::zeroed() };
+        let mut wp: MaybeUninit<WINDOWPLACEMENT> = MaybeUninit::zeroed();
         let mut hwnd = self.hwnd();
 
-        if unsafe { winuser::GetWindowPlacement(hwnd.as_mut(), &mut wp) } == 0 {
+        if unsafe { winuser::GetWindowPlacement(hwnd.as_mut(), wp.as_mut_ptr()) } == 0 {
             return Err(crate::win32_error(crate::Win32Function::GetWindowPlacement));
         }
 
+        let mut wp = unsafe { wp.assume_init() };
         wp.rcNormalPosition.left = rect.origin.x;
         wp.rcNormalPosition.top = rect.origin.y;
         wp.rcNormalPosition.right = rect.origin.x + rect.size.width;
@@ -393,11 +385,11 @@ impl Window {
 
     /// Set the text value of this window.
     #[inline]
-    pub fn set_text(&self, text: &WStr) -> crate::Result<()> {
+    pub fn set_text(&self, text: &str) -> crate::Result<()> {
         // note: i've personally tested this in C. You can delete the actual
         // allocated memory if you've already run SetWindowText.
-        if unsafe { winuser::SetWindowTextW(self.hwnd().as_mut(), text.as_ptr()) } == 0 {
-            Err(crate::win32_error(crate::Win32Function::SetWindowTextW))
+        if unsafe { winuser::SetWindowTextA(self.hwnd().as_mut(), text.as_ptr() as LPCSTR) } == 0 {
+            Err(crate::win32_error(crate::Win32Function::SetWindowTextA))
         } else {
             Ok(())
         }

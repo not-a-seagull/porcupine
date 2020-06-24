@@ -43,9 +43,11 @@
  * ----------------------------------------------------------------------------------
  */
 
+use parking_lot::Mutex;
 use std::{
+    fmt,
     ptr::{self, NonNull},
-    sync::{atomic::AtomicPtr, Arc, Mutex},
+    sync::{atomic::AtomicPtr, Arc},
 };
 use winapi::{
     shared::minwindef::{HINSTANCE__, HMODULE},
@@ -57,6 +59,12 @@ pub struct ModuleInfo {
     handle: AtomicPtr<HINSTANCE__>,
 }
 
+impl fmt::Debug for ModuleInfo {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Win32 Module")
+    }
+}
+
 impl ModuleInfo {
     /// Create a new instance of module information.
     #[inline]
@@ -64,8 +72,8 @@ impl ModuleInfo {
         // get the module handle
         let mut handle: HMODULE = ptr::null_mut();
 
-        if unsafe { libloaderapi::GetModuleHandleExW(0, ptr::null(), &mut handle) } == 0 {
-            Err(crate::win32_error(crate::Win32Function::GetModuleHandleExW))
+        if unsafe { libloaderapi::GetModuleHandleExA(0, ptr::null(), &mut handle) } == 0 {
+            Err(crate::win32_error(crate::Win32Function::GetModuleHandleExA))
         } else {
             debug_assert!(!handle.is_null());
             Ok(Self {
