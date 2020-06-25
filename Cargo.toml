@@ -10,4 +10,4 @@ euclid = "0.20"
 lazy_static = "1"
 parking_lot = "0.10"
 thiserror = "1"
-winapi = { version = "0.3", features = ["errhandlingapi", "impl-debug", "minwindef", "std", "winbase", "windef", "wingdi", "winuser", "wingdi"] }
+winapi = { version = "0.3", features = ["errhandlingapi", "impl-debug", "minwindef", "std", "winbase", "windef", "wingdi", "winuser", "wingdi", "commctrl"] }

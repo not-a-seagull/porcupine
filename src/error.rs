@@ -80,6 +80,7 @@ pub enum Win32Function {
     CreateBitmap,
     GetObjectA,
     BitBlt,
+    InitCommonControlsEx,
     Other(&'static str),
 }
 
@@ -116,6 +117,7 @@ impl fmt::Display for Win32Function {
                 Self::CreateBitmap => "CreateBitmap",
                 Self::GetObjectA => "GetObjectA",
                 Self::BitBlt => "BitBlt",
+                Self::InitCommonControlsEx => "InitCommonControlsEx",
                 Self::Other(s) => s,
             }
         )

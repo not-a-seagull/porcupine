@@ -1,5 +1,5 @@
 /* -----------------------------------------------------------------------------------
- * src/lib.rs - Root of the Porcupine library.
+ * src/commctrl.rs - Windows Common Controls
  * porcupine - Safe wrapper around the graphical parts of Win32.
  * Copyright © 2020 not_a_seagull
  *
@@ -43,45 +43,25 @@
  * ----------------------------------------------------------------------------------
  */
 
-#![cfg(windows)]
+use std::mem;
+use winapi::{shared::minwindef::{DWORD, FALSE}, um::commctrl::*};
 
-//! This is intended to be a safe Rust wrapper around the Win32 API, with an emphasis on the graphical WinUser
-//! part of the API.
-
-pub mod bitmap;
-pub mod commctrl;
-pub mod dc;
-mod error;
-pub mod module;
-pub mod window;
-
-pub use bitmap::*;
-pub use commctrl::*;
-pub use dc::*;
-pub use error::*;
-pub use module::*;
-pub use window::*;
-
-/// Utility function to convert Rust bool to Win32 BOOL
-#[inline]
-pub fn wboolify(rbool: bool) -> winapi::shared::minwindef::BOOL {
-    use winapi::shared::minwindef::{FALSE, TRUE};
-    if rbool {
-        TRUE
-    } else {
-        FALSE
+bitflags::bitflags! {
+    #[doc = "Common Controls classes to be initialized"]
+    pub struct ControlClasses : DWORD {
+        const ANIMATE_CLASS = ICC_ANIMATE_CLASS;
+        const BAR_CLASSES = ICC_BAR_CLASSES;
     }
 }
 
-/// Utility function to convert a Euclid rect to a Windows rect.
-#[inline]
-pub fn eurect_to_winrect(
-    eurect: euclid::default::Rect<std::os::raw::c_int>,
-) -> winapi::shared::windef::RECT {
-    winapi::shared::windef::RECT {
-        left: eurect.origin.x,
-        top: eurect.origin.y,
-        right: eurect.origin.x + eurect.size.width,
-        bottom: eurect.origin.y + eurect.size.height,
-    }
+/// Initialize Windows Conntrol Controls with the specified classes.
+pub fn init_commctrl(classes: ControlClasses) -> crate::Result<()> {
+    let init_struct = INITCOMMONCONTROLSEX {
+        dwSize: mem::size_of::<INITCOMMONCONTROLSEX>() as DWORD,
+        dwICC: classes.bits(),
+    };
+
+    if unsafe { InitCommonControlsEx(&init_struct) } == FALSE {
+        Err(crate::win32_error(crate::Win32Function::InitCommonControlsEx))
+    } else { Ok(()) } 
 }
