@@ -44,9 +44,11 @@
  */
 
 use crate::DeviceContext;
-use euclid::default::Rect;
+use euclid::default::{Point2D, Rect};
 use parking_lot::Mutex;
 use std::{
+    any::Any,
+    convert::TryInto,
     fmt,
     mem::{self, MaybeUninit},
     os::raw::c_int,
@@ -55,11 +57,17 @@ use std::{
 };
 use winapi::{
     shared::{
+        basetsd::LONG_PTR,
         minwindef::{DWORD, FALSE, TRUE, UINT},
         ntdef::LPCSTR,
-        windef::HWND__,
+        windef::{HBRUSH, HWND__, POINT},
     },
-    um::winuser::{self, WINDOWPLACEMENT, WNDCLASSEXA, WNDPROC},
+    um::{
+        errhandlingapi,
+        winuser::{
+            self, COLOR_WINDOW, IDC_ARROW, IDI_APPLICATION, WINDOWPLACEMENT, WNDCLASSEXA, WNDPROC,
+        },
+    },
 };
 
 /// An owned, modifyable window class.
@@ -69,6 +77,9 @@ pub struct OwnedWindowClass {
     is_registered: bool,
     class_name: String,
 }
+
+unsafe impl Send for OwnedWindowClass {}
+unsafe impl Sync for OwnedWindowClass {}
 
 impl fmt::Debug for OwnedWindowClass {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -84,18 +95,29 @@ impl fmt::Debug for OwnedWindowClass {
 impl OwnedWindowClass {
     /// Create a new WindowClass that has yet to be initialized.
     pub fn new(name: String) -> Self {
-        let mut inner: MaybeUninit<WNDCLASSEXA> = MaybeUninit::zeroed();
+        // get the default icon
+        let icon = unsafe { winuser::LoadIconW(ptr::null_mut(), IDI_APPLICATION) };
 
-        // unsafe is needed here in order to set the inner struct's fields
-        unsafe {
-            (*inner.as_mut_ptr()).cbSize = mem::size_of::<WNDCLASSEXA>() as UINT;
-            (*inner.as_mut_ptr()).lpfnWndProc = Some(winuser::DefWindowProcW);
-            (*inner.as_mut_ptr()).hInstance = crate::MODULE_INFO.lock().handle().as_mut();
-            (*inner.as_mut_ptr()).lpszClassName = name.as_ptr() as LPCSTR;
-        }
+        // create the window class
+        let inner = WNDCLASSEXA {
+            cbSize: mem::size_of::<WNDCLASSEXA>() as UINT,
+            lpfnWndProc: Some(winuser::DefWindowProcW),
+            hInstance: unsafe { crate::MODULE_INFO.lock().handle().as_mut() },
+            lpszClassName: name.as_ptr() as LPCSTR,
+            hIcon: icon,
+            hIconSm: icon,
+            style: 0,
+            cbClsExtra: 0,
+            cbWndExtra: 0,
+            hCursor: unsafe { winuser::LoadCursorW(ptr::null_mut(), IDC_ARROW) },
+            hbrBackground: unsafe {
+                mem::transmute::<usize, HBRUSH>((COLOR_WINDOW + 1).try_into().unwrap())
+            },
+            lpszMenuName: ptr::null(),
+        };
 
         Self {
-            inner: unsafe { inner.assume_init() },
+            inner,
             is_registered: false,
             class_name: name,
         }
@@ -154,11 +176,6 @@ impl OwnedWindowClass {
             self.is_registered = true;
             Ok(())
         }
-    }
-
-    /// Get a class' information from its name.
-    pub fn from_name(name: String) -> Result<Self, (crate::Error, String)> {
-        unimplemented!()
     }
 }
 
@@ -281,6 +298,7 @@ impl CmdShow {
 /// A wrapper around the Win32 HWND.
 pub struct Window {
     hwnd: Arc<Mutex<AtomicPtr<HWND__>>>,
+    has_user_data: bool,
 }
 
 impl Window {
@@ -318,6 +336,7 @@ impl Window {
         } else {
             Ok(Self {
                 hwnd: Arc::new(Mutex::new(AtomicPtr::new(hwnd))),
+                has_user_data: false,
             })
         }
     }
@@ -327,6 +346,10 @@ impl Window {
     /// # Panics
     ///
     /// This function will panic if the internal mutex is unable to be locked.
+    ///
+    /// # TODO
+    ///
+    /// This function is probably unsound. Take a better look at it later.
     pub fn hwnd(&self) -> NonNull<HWND__> {
         let mut p = self.hwnd.lock();
         let ptr = p.get_mut();
@@ -420,5 +443,87 @@ impl Window {
     #[inline]
     pub fn begin_paint(&self) -> crate::Result<DeviceContext> {
         DeviceContext::begin_paint(self)
+    }
+
+    /// Set the user data field of this window to a pointer.
+    ///
+    /// Note: This does not set has_user_data because we don't know the nature of the pointer.
+    #[inline]
+    pub unsafe fn set_user_data_pointer<T: ?Sized>(&self, ptr: *mut T) -> crate::Result<()> {
+        errhandlingapi::SetLastError(0);
+
+        if winuser::SetWindowLongPtrA(
+            self.hwnd().as_mut(),
+            winuser::GWLP_USERDATA,
+            ptr as *const () as LONG_PTR,
+        ) == FALSE as LONG_PTR
+            && errhandlingapi::GetLastError() != 0
+        {
+            Err(crate::win32_error(crate::Win32Function::SetWindowLongPtrA))
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Set the user data of this window to a box.
+    #[inline]
+    pub fn set_user_data_box<T: ?Sized>(&mut self, b: Box<T>) -> crate::Result<()> {
+        unsafe { self.set_user_data_pointer(Box::into_raw(b)) }?;
+        self.has_user_data = true;
+        Ok(())
+    }
+
+    /// Take the user data of this window out.
+    #[inline]
+    pub fn take_user_data<T: Any>(&mut self) -> crate::Result<Box<T>> {
+        unsafe { errhandlingapi::SetLastError(0) };
+
+        let res = unsafe {
+            winuser::SetWindowLongPtrA(
+                self.hwnd().as_mut(),
+                winuser::GWLP_USERDATA,
+                ptr::null_mut() as *const () as LONG_PTR,
+            )
+        };
+        self.has_user_data = false;
+
+        if res == FALSE as LONG_PTR && unsafe { errhandlingapi::GetLastError() } != 0 {
+            return Err(crate::win32_error(crate::Win32Function::SetWindowLongPtrA));
+        }
+
+        let res: Box<dyn Any + 'static> =
+            unsafe { Box::from_raw(mem::transmute::<LONG_PTR, *mut ()>(res) as *mut dyn Any) };
+        // downcast to T
+        Box::<dyn Any + 'static>::downcast::<T>(res)
+            .map_err(|_| crate::Error::StaticMsg("Unable to downcast user data"))
+    }
+
+    /// Convert a point from the screen into coordinates relative to this window.
+    #[inline]
+    pub fn screen_to_client(&self, pt: Point2D<c_int>) -> crate::Result<Point2D<c_int>> {
+        let mut lp = POINT {
+            x: pt.x.into(),
+            y: pt.y.into(),
+        };
+        if unsafe { winuser::ScreenToClient(self.hwnd().as_mut(), &mut lp) } == 0 {
+            Err(crate::win32_error(crate::Win32Function::ScreenToClient))
+        } else {
+            Ok(Point2D::new(lp.x.into(), lp.y.into()))
+        }
+    }
+}
+
+impl Drop for Window {
+    fn drop(&mut self) {
+        // if we have user data, dispose of it
+        if self.has_user_data {
+            let pointer = unsafe {
+                mem::transmute::<LONG_PTR, *mut ()>(winuser::GetWindowLongPtrA(
+                    self.hwnd().as_mut(),
+                    winuser::GWLP_USERDATA,
+                )) as *mut dyn Any
+            };
+            let _b = unsafe { Box::from_raw(pointer) }; // drops the box
+        }
     }
 }

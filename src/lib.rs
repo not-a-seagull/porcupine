@@ -48,11 +48,16 @@
 //! This is intended to be a safe Rust wrapper around the Win32 API, with an emphasis on the graphical WinUser
 //! part of the API.
 
+pub extern crate winapi;
+
+pub use winapi::shared::windef::{HWND, HWND__};
+
 pub mod bitmap;
 pub mod commctrl;
 pub mod dc;
 mod error;
 pub mod module;
+pub mod msg;
 pub mod window;
 
 pub use bitmap::*;
@@ -60,6 +65,7 @@ pub use commctrl::*;
 pub use dc::*;
 pub use error::*;
 pub use module::*;
+pub use msg::*;
 pub use window::*;
 
 /// Utility function to convert Rust bool to Win32 BOOL
@@ -83,5 +89,21 @@ pub fn eurect_to_winrect(
         top: eurect.origin.y,
         right: eurect.origin.x + eurect.size.width,
         bottom: eurect.origin.y + eurect.size.height,
+    }
+}
+
+use euclid::default::Point2D;
+use std::{mem::MaybeUninit, os::raw::c_int};
+use winapi::{shared::windef::POINT, um::winuser};
+
+/// Get the current location of the mouse cursor on screen.
+#[inline]
+pub fn cursor_pos() -> Result<Point2D<c_int>> {
+    let mut point: MaybeUninit<POINT> = MaybeUninit::zeroed();
+    if unsafe { winuser::GetCursorPos(point.as_mut_ptr()) } == 0 {
+        Err(win32_error(Win32Function::GetCursorPos))
+    } else {
+        let point = unsafe { point.assume_init() };
+        Ok(Point2D::new(point.x.into(), point.y.into()))
     }
 }

@@ -51,7 +51,7 @@ use winapi::{
 };
 
 /// Win32 functions that are capable of erroring out.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Hash)]
 pub enum Win32Function {
     MultiByteToWideChar,
     WideCharToMultiByte,
@@ -81,6 +81,11 @@ pub enum Win32Function {
     GetObjectA,
     BitBlt,
     InitCommonControlsEx,
+    GetMessageA,
+    SetWindowLongPtrA,
+    GetWindowLongPtrA,
+    ScreenToClient,
+    GetCursorPos,
     Other(&'static str),
 }
 
@@ -90,6 +95,11 @@ impl fmt::Display for Win32Function {
             f,
             "{}",
             match *self {
+                Self::GetCursorPos => "GetCursorPos",
+                Self::ScreenToClient => "ScreenToClient",
+                Self::GetWindowLongPtrA => "GetWindowLongPtrA",
+                Self::SetWindowLongPtrA => "SetWindowLongPtrA",
+                Self::GetMessageA => "GetMessageA",
                 Self::MultiByteToWideChar => "MultiByteToWideChar",
                 Self::WideCharToMultiByte => "WideCharToMultiByte",
                 Self::GetModuleHandleExA => "GetModuleHandleExA",
@@ -125,7 +135,7 @@ impl fmt::Display for Win32Function {
 }
 
 /// The error used by the Porcupine API.
-#[derive(Debug, Error)]
+#[derive(Debug, Error, Clone)]
 pub enum Error {
     #[error("This error should not have been able to possibly occur.")]
     Unreachable,

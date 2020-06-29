@@ -1,5 +1,5 @@
 /* -----------------------------------------------------------------------------------
- * src/commctrl.rs - Windows Common Controls
+ * src/msg.rs - Functions wrapping around the message loop API.
  * porcupine - Safe wrapper around the graphical parts of Win32.
  * Copyright © 2020 not_a_seagull
  *
@@ -43,32 +43,42 @@
  * ----------------------------------------------------------------------------------
  */
 
-use std::mem;
-use winapi::{
-    shared::minwindef::{DWORD, FALSE},
-    um::commctrl::*,
-};
+// just re-export MSG
+use std::{cmp::Ordering, mem::MaybeUninit, ptr};
+use winapi::um::winuser;
+pub use winapi::um::winuser::MSG;
 
-bitflags::bitflags! {
-    #[doc = "Common Controls classes to be initialized"]
-    pub struct ControlClasses : DWORD {
-        const ANIMATE_CLASS = ICC_ANIMATE_CLASS;
-        const BAR_CLASSES = ICC_BAR_CLASSES;
+/// Get a message from the Win32 event loop.
+#[inline]
+pub fn get_message() -> crate::Result<Option<MSG>> {
+    let mut m: MaybeUninit<MSG> = MaybeUninit::zeroed();
+
+    match unsafe { winuser::GetMessageA(m.as_mut_ptr(), ptr::null_mut(), 0, 0) }.cmp(&0) {
+        Ordering::Greater => {
+            // if GetMessage is greater than zero, we've created a valid message
+            Ok(Some(unsafe { m.assume_init() }))
+        }
+        Ordering::Equal => {
+            // if GetMessage is zero, this is a quit message
+            Ok(None)
+        }
+        Ordering::Less => {
+            // if GetMessage is less than zero, an error has occurred
+            Err(crate::win32_error(crate::Win32Function::GetMessageA))
+        }
     }
 }
 
-/// Initialize Windows Conntrol Controls with the specified classes.
-pub fn init_commctrl(classes: ControlClasses) -> crate::Result<()> {
-    let init_struct = INITCOMMONCONTROLSEX {
-        dwSize: mem::size_of::<INITCOMMONCONTROLSEX>() as DWORD,
-        dwICC: classes.bits(),
-    };
+/// Translate the message from the Win32 event loop.
+#[inline]
+pub fn translate_message(m: &MSG) {
+    // note: this function does not fail, according to the Win32 docs
+    unsafe { winuser::TranslateMessage(m) };
+}
 
-    if unsafe { InitCommonControlsEx(&init_struct) } == FALSE {
-        Err(crate::win32_error(
-            crate::Win32Function::InitCommonControlsEx,
-        ))
-    } else {
-        Ok(())
-    }
+/// Dispatch the message from the Win32 event loop.
+#[inline]
+pub fn dispatch_message(m: &MSG) {
+    // note: the function returns the return value of the WndProc. This should be ignored.
+    unsafe { winuser::DispatchMessageA(m) };
 }
