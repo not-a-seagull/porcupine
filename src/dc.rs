@@ -43,7 +43,7 @@
  * ----------------------------------------------------------------------------------
  */
 
-use crate::{Bitmap, Window};
+use crate::{Bitmap, GenericWindow, WeakWindow};
 use euclid::default::{Point2D, Rect};
 use parking_lot::Mutex;
 use std::{
@@ -56,7 +56,7 @@ use std::{
 use winapi::{
     shared::{
         minwindef::DWORD,
-        windef::{HBITMAP__, HDC__, HWND__},
+        windef::{HBITMAP__, HDC__},
     },
     um::{
         wingdi,
@@ -79,7 +79,7 @@ enum DeviceContextStorage {
 // Types of device contexts that can be activated.
 enum DeviceContextType {
     Painter {
-        owner: Weak<Mutex<AtomicPtr<HWND__>>>,
+        owner: WeakWindow,
         paint_struct: PAINTSTRUCT,
     },
     OwnsGDIObject {
@@ -104,7 +104,7 @@ impl Drop for DeviceContext {
                 ref owner,
                 ref paint_struct,
             } => {
-                if let Some(o) = owner.upgrade() {
+                if let Some(o) = owner.hwnd.upgrade() {
                     let mut parent = o.lock();
                     // end the paint
                     unsafe {
@@ -139,7 +139,7 @@ pub enum CopyOperation {
 
 impl DeviceContext {
     /// Start painting with a new DC.
-    pub fn begin_paint(hwnd: &Window) -> crate::Result<Self> {
+    pub fn begin_paint<T: GenericWindow + ?Sized>(hwnd: &T) -> crate::Result<Self> {
         let mut ps: MaybeUninit<PAINTSTRUCT> = MaybeUninit::zeroed();
         let hdc = unsafe { winuser::BeginPaint(hwnd.hwnd().as_mut(), ps.as_mut_ptr()) };
 

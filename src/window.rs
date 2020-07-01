@@ -49,6 +49,7 @@ use parking_lot::Mutex;
 use std::{
     any::Any,
     convert::TryInto,
+    ffi::c_void,
     fmt,
     mem::{self, MaybeUninit},
     os::raw::c_int,
@@ -60,7 +61,7 @@ use winapi::{
         basetsd::LONG_PTR,
         minwindef::{DWORD, FALSE, TRUE, UINT},
         ntdef::LPCSTR,
-        windef::{HBRUSH, HWND__, POINT},
+        windef::{HBRUSH, HWND, HWND__, POINT},
     },
     um::{
         errhandlingapi,
@@ -301,68 +302,47 @@ pub struct Window {
     has_user_data: bool,
 }
 
-impl Window {
-    /// Create a new window class.
-    pub fn new<WC: WindowClass>(
-        window_class: &WC,
-        window_name: &str,
-        style: WindowStyle,
-        extended_style: ExtendedWindowStyle,
-        bounds: Rect<c_int>,
-        parent: Option<&Self>,
-    ) -> crate::Result<Self> {
-        let hwnd = unsafe {
-            winuser::CreateWindowExA(
-                extended_style.bits(),
-                window_class.identifier().as_ptr() as LPCSTR,
-                window_name.as_ptr() as LPCSTR,
-                style.bits(),
-                bounds.origin.x,
-                bounds.origin.y,
-                bounds.size.width,
-                bounds.size.height,
-                match parent {
-                    Some(p) => p.hwnd().as_mut(),
-                    None => ptr::null_mut(),
-                },
-                ptr::null_mut(),
-                crate::MODULE_INFO.lock().handle().as_mut(),
-                ptr::null_mut(),
-            )
-        };
+/// A weak wrapper around the Win32 HWND.
+#[derive(Clone)]
+#[repr(transparent)]
+pub struct WeakWindow {
+    pub(crate) hwnd: Weak<Mutex<AtomicPtr<HWND__>>>,
+}
 
-        if hwnd.is_null() {
-            Err(crate::win32_error(crate::Win32Function::CreateWindowExA))
-        } else {
-            Ok(Self {
-                hwnd: Arc::new(Mutex::new(AtomicPtr::new(hwnd))),
-                has_user_data: false,
-            })
-        }
-    }
+/// A reference to a window that doesn't run the standard drop procedures.
+pub struct DroplessWindow {
+    hwnd: Arc<Mutex<AtomicPtr<HWND__>>>,
+}
 
+/// A trait to generalize interactions with windows.
+pub trait GenericWindow {
     /// Get the raw handle to this window.
     ///
     /// # Panics
     ///
-    /// This function will panic if the internal mutex is unable to be locked.
-    ///
-    /// # TODO
-    ///
-    /// This function is probably unsound. Take a better look at it later.
-    pub fn hwnd(&self) -> NonNull<HWND__> {
-        let mut p = self.hwnd.lock();
-        let ptr = p.get_mut();
-        debug_assert!(!ptr.is_null());
-        unsafe { NonNull::new_unchecked(*ptr) }
-    }
+    /// This function will panic if the internal mutex is unable to be locked, or if
+    /// the window has already been dropped.
+    fn hwnd(&self) -> NonNull<HWND__>;
 
-    pub fn weak_reference(&self) -> Weak<Mutex<AtomicPtr<HWND__>>> {
-        Arc::downgrade(&self.hwnd)
+    /// Create a weak reference to this window.
+    fn weak_reference(&self) -> WeakWindow;
+
+    /// Convert a point from the screen into coordinates relative to this window.
+    #[inline]
+    fn screen_to_client(&self, pt: Point2D<c_int>) -> crate::Result<Point2D<c_int>> {
+        let mut lp = POINT {
+            x: pt.x.into(),
+            y: pt.y.into(),
+        };
+        if unsafe { winuser::ScreenToClient(self.hwnd().as_mut(), &mut lp) } == 0 {
+            Err(crate::win32_error(crate::Win32Function::ScreenToClient))
+        } else {
+            Ok(Point2D::new(lp.x.into(), lp.y.into()))
+        }
     }
 
     /// Change the bounds of this window.
-    pub fn reshape(&self, rect: Rect<c_int>) -> crate::Result<()> {
+    fn reshape(&self, rect: Rect<c_int>) -> crate::Result<()> {
         // create the window placement struct
         let mut wp: MaybeUninit<WINDOWPLACEMENT> = MaybeUninit::zeroed();
         let mut hwnd = self.hwnd();
@@ -386,19 +366,19 @@ impl Window {
 
     /// Enable or unenable this window.
     #[inline]
-    pub fn enable(&self, do_display: bool) {
+    fn enable(&self, do_display: bool) {
         unsafe { winuser::EnableWindow(self.hwnd().as_mut(), crate::wboolify(do_display)) };
     }
 
     /// Show the window.
     #[inline]
-    pub fn show(&self, cmd_show: CmdShow) {
+    fn show(&self, cmd_show: CmdShow) {
         unsafe { winuser::ShowWindow(self.hwnd().as_mut(), cmd_show as c_int) };
     }
 
     /// Update the window.
     #[inline]
-    pub fn update(&self) -> crate::Result<()> {
+    fn update(&self) -> crate::Result<()> {
         if unsafe { winuser::UpdateWindow(self.hwnd().as_mut()) } == 0 {
             Err(crate::win32_error(crate::Win32Function::UpdateWindow))
         } else {
@@ -408,7 +388,7 @@ impl Window {
 
     /// Set the text value of this window.
     #[inline]
-    pub fn set_text(&self, text: &str) -> crate::Result<()> {
+    fn set_text(&self, text: &str) -> crate::Result<()> {
         // note: i've personally tested this in C. You can delete the actual
         // allocated memory if you've already run SetWindowText.
         if unsafe { winuser::SetWindowTextA(self.hwnd().as_mut(), text.as_ptr() as LPCSTR) } == 0 {
@@ -420,7 +400,7 @@ impl Window {
 
     /// Invalid this window and force a redraw.
     #[inline]
-    pub fn invalidate(&self, invalidated_rect: Option<Rect<c_int>>) -> crate::Result<()> {
+    fn invalidate(&self, invalidated_rect: Option<Rect<c_int>>) -> crate::Result<()> {
         let rect = invalidated_rect.map(crate::eurect_to_winrect);
         if unsafe {
             winuser::InvalidateRect(
@@ -441,8 +421,126 @@ impl Window {
 
     /// Begin painting ops on this window.
     #[inline]
-    pub fn begin_paint(&self) -> crate::Result<DeviceContext> {
+    fn begin_paint(&self) -> crate::Result<DeviceContext> {
         DeviceContext::begin_paint(self)
+    }
+}
+
+#[inline]
+fn get_hwnd(a: &Arc<Mutex<AtomicPtr<HWND__>>>) -> NonNull<HWND__> {
+    let mut p = a.lock();
+    let ptr = p.get_mut();
+    debug_assert!(!ptr.is_null());
+    unsafe { NonNull::new_unchecked(*ptr) }
+}
+
+impl GenericWindow for Window {
+    fn hwnd(&self) -> NonNull<HWND__> {
+        // TODO: this might be unsound. check it later.
+        get_hwnd(&self.hwnd)
+    }
+
+    fn weak_reference(&self) -> WeakWindow {
+        WeakWindow {
+            hwnd: Arc::downgrade(&self.hwnd),
+        }
+    }
+}
+
+impl GenericWindow for DroplessWindow {
+    fn hwnd(&self) -> NonNull<HWND__> {
+        get_hwnd(&self.hwnd)
+    }
+
+    fn weak_reference(&self) -> WeakWindow {
+        WeakWindow {
+            hwnd: Arc::downgrade(&self.hwnd),
+        }
+    }
+}
+
+impl GenericWindow for WeakWindow {
+    fn hwnd(&self) -> NonNull<HWND__> {
+        let upgraded = self
+            .hwnd
+            .upgrade()
+            .expect("Unable to upgrade weak window into strong window.");
+
+        get_hwnd(&upgraded)
+    }
+
+    fn weak_reference(&self) -> WeakWindow {
+        self.clone()
+    }
+}
+
+impl Window {
+    /// Create a new window with a specified creation parameter.
+    pub fn with_creation_param<WC: WindowClass, T: Any>(
+        window_class: &WC,
+        window_name: &str,
+        style: WindowStyle,
+        extended_style: ExtendedWindowStyle,
+        bounds: Rect<c_int>,
+        parent: Option<&Self>,
+        create_parameter: Option<Box<T>>,
+    ) -> crate::Result<Self> {
+        let parent = match parent {
+            Some(p) => unsafe { p.hwnd().as_mut() },
+            None => ptr::null_mut(),
+        };
+
+        let lpparam = match create_parameter {
+            Some(c) => Box::into_raw(c),
+            None => ptr::null_mut(),
+        };
+
+        let hwnd = unsafe {
+            winuser::CreateWindowExA(
+                extended_style.bits(),
+                window_class.identifier().as_ptr() as LPCSTR,
+                window_name.as_ptr() as LPCSTR,
+                style.bits(),
+                bounds.origin.x,
+                bounds.origin.y,
+                bounds.size.width,
+                bounds.size.height,
+                parent,
+                ptr::null_mut(),
+                crate::MODULE_INFO.lock().handle().as_mut(),
+                lpparam as *mut c_void,
+            )
+        };
+
+        if hwnd.is_null() {
+            Err(crate::win32_error(crate::Win32Function::CreateWindowExA))
+        } else {
+            Ok(Self {
+                hwnd: Arc::new(Mutex::new(AtomicPtr::new(hwnd))),
+                has_user_data: false,
+            })
+        }
+    }
+
+    /// Create a new window.
+    #[inline]
+    pub fn new<WC: WindowClass>(
+        window_class: &WC,
+        window_name: &str,
+        style: WindowStyle,
+        extended_style: ExtendedWindowStyle,
+        bounds: Rect<c_int>,
+        parent: Option<&Self>,
+    ) -> crate::Result<Self> {
+        Self::with_creation_param::<WC, ()>(
+            window_class,
+            window_name,
+            style,
+            extended_style,
+            bounds,
+            parent,
+            None,
+        )
     }
 
     /// Set the user data field of this window to a pointer.
@@ -473,6 +571,20 @@ impl Window {
         Ok(())
     }
 
+    /// Get the user data of this window.
+    #[inline]
+    pub fn user_data<T: Any>(&self) -> crate::Result<&T> {
+        let res =
+            unsafe { winuser::GetWindowLongPtrA(self.hwnd().as_mut(), winuser::GWLP_USERDATA) };
+
+        if res == FALSE as LONG_PTR {
+            return Err(crate::win32_error(crate::Win32Function::GetWindowLongPtrA));
+        }
+
+        let res = unsafe { mem::transmute::<LONG_PTR, *const T>(res) };
+        Ok(unsafe { &*res })
+    }
+
     /// Take the user data of this window out.
     #[inline]
     pub fn take_user_data<T: Any>(&mut self) -> crate::Result<Box<T>> {
@@ -497,18 +609,17 @@ impl Window {
         Box::<dyn Any + 'static>::downcast::<T>(res)
             .map_err(|_| crate::Error::StaticMsg("Unable to downcast user data"))
     }
+}
 
-    /// Convert a point from the screen into coordinates relative to this window.
-    #[inline]
-    pub fn screen_to_client(&self, pt: Point2D<c_int>) -> crate::Result<Point2D<c_int>> {
-        let mut lp = POINT {
-            x: pt.x.into(),
-            y: pt.y.into(),
-        };
-        if unsafe { winuser::ScreenToClient(self.hwnd().as_mut(), &mut lp) } == 0 {
-            Err(crate::win32_error(crate::Win32Function::ScreenToClient))
-        } else {
-            Ok(Point2D::new(lp.x.into(), lp.y.into()))
+impl DroplessWindow {
+    /// Create a new dropless window.
+    ///
+    /// # Safety
+    ///
+    /// This function is unsafe because it doesn't follow the usual safety rules for Window.
+    pub unsafe fn new(hwnd: HWND) -> DroplessWindow {
+        Self {
+            hwnd: Arc::new(Mutex::new(AtomicPtr::new(hwnd))),
         }
     }
 }

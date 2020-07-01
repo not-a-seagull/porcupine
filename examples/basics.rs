@@ -1,5 +1,5 @@
 /* -----------------------------------------------------------------------------------
- * src/lib.rs - Root of the Porcupine library.
+ * examples/basics.rs - A basic test of Win32 functionality.
  * porcupine - Safe wrapper around the graphical parts of Win32.
  * Copyright © 2020 not_a_seagull
  *
@@ -43,77 +43,53 @@
  * ----------------------------------------------------------------------------------
  */
 
-#![cfg(windows)]
-
-//! This is intended to be a safe Rust wrapper around the Win32 API, with an emphasis on the graphical WinUser
-//! part of the API.
-
-pub extern crate winapi;
-
-pub use winapi::{
-    shared::{
-        minwindef::{LPARAM, LRESULT, UINT, WPARAM},
-        windef::{HWND, HWND__},
-    },
-    um::winuser,
+use euclid::rect;
+use porcupine::{
+    prelude::*, winuser, CmdShow, DroplessWindow, ExtendedWindowStyle, OwnedWindowClass, Window, WindowStyle,
+    HWND, LPARAM, LRESULT, UINT, WPARAM,
 };
 
-pub mod bitmap;
-pub mod commctrl;
-pub mod dc;
-mod error;
-pub mod module;
-pub mod msg;
-pub mod window;
+unsafe extern "system" fn window_procedure(
+    hwnd: HWND,
+    msg: UINT,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
+    let _w = DroplessWindow::new(hwnd);
 
-pub use bitmap::*;
-pub use commctrl::*;
-pub use dc::*;
-pub use error::*;
-pub use module::*;
-pub use msg::*;
-pub use window::*;
-
-/// Utility function to convert Rust bool to Win32 BOOL
-#[inline]
-pub fn wboolify(rbool: bool) -> winapi::shared::minwindef::BOOL {
-    use winapi::shared::minwindef::{FALSE, TRUE};
-    if rbool {
-        TRUE
-    } else {
-        FALSE
+    match msg {
+        winuser::WM_CLOSE => { winuser::DestroyWindow(hwnd); },
+        winuser::WM_DESTROY => winuser::PostQuitMessage(0),
+        _ => return winuser::DefWindowProcA(hwnd, msg, wparam, lparam),
     }
+
+    0
 }
 
-/// Utility function to convert a Euclid rect to a Windows rect.
-#[inline]
-pub fn eurect_to_winrect(
-    eurect: euclid::default::Rect<std::os::raw::c_int>,
-) -> winapi::shared::windef::RECT {
-    winapi::shared::windef::RECT {
-        left: eurect.origin.x,
-        top: eurect.origin.y,
-        right: eurect.origin.x + eurect.size.width,
-        bottom: eurect.origin.y + eurect.size.height,
+fn main() -> porcupine::Result<()> {
+    // register the window class
+    let wc_name = "PorcupineBasicsTest".to_string();
+    let mut wc = OwnedWindowClass::new(wc_name);
+    wc.set_window_proc(Some(window_procedure));
+    wc.register()?;
+
+    // create the window
+    let w = Window::new(
+        &wc,
+        "Hello world!",
+        WindowStyle::OVERLAPPED_WINDOW,
+        ExtendedWindowStyle::NONE,
+        rect(0, 0, 400, 200),
+        None,
+    )?;
+    w.show(CmdShow::Show);
+    w.update()?;
+
+    // create the event loop
+    while let Some(ref msg) = porcupine::get_message()? {
+        porcupine::translate_message(msg);
+        porcupine::dispatch_message(msg);
     }
-}
 
-use euclid::default::Point2D;
-use std::{mem::MaybeUninit, os::raw::c_int};
-use winapi::shared::windef::POINT;
-
-/// Get the current location of the mouse cursor on screen.
-#[inline]
-pub fn cursor_pos() -> Result<Point2D<c_int>> {
-    let mut point: MaybeUninit<POINT> = MaybeUninit::zeroed();
-    if unsafe { winuser::GetCursorPos(point.as_mut_ptr()) } == 0 {
-        Err(win32_error(Win32Function::GetCursorPos))
-    } else {
-        let point = unsafe { point.assume_init() };
-        Ok(Point2D::new(point.x.into(), point.y.into()))
-    }
-}
-
-pub mod prelude {
-    pub use super::GenericWindow;
+    Ok(())
 }
