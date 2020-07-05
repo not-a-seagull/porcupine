@@ -44,10 +44,19 @@
  */
 
 #![cfg(windows)]
+#![no_std]
 
 //! This is intended to be a safe Rust wrapper around the Win32 API, with an emphasis on the graphical WinUser
 //! part of the API.
 
+#[cfg(not(feature = "std"))]
+extern crate alloc;
+#[cfg(feature = "std")]
+extern crate std;
+#[cfg(feature = "std")]
+extern crate std as core;
+#[cfg(feature = "std")]
+extern crate std as alloc;
 pub extern crate winapi;
 
 pub use winapi::{
@@ -74,6 +83,14 @@ pub use module::*;
 pub use msg::*;
 pub use window::*;
 
+// which mutexes do we use?
+pub(crate) mod mutexes {
+    #[cfg(feature = "std")]
+    pub use parking_lot::*;
+    #[cfg(not(feature = "std"))]
+    pub use spin::*;
+}
+
 /// Utility function to convert Rust bool to Win32 BOOL
 #[inline]
 pub fn wboolify(rbool: bool) -> winapi::shared::minwindef::BOOL {
@@ -88,7 +105,7 @@ pub fn wboolify(rbool: bool) -> winapi::shared::minwindef::BOOL {
 /// Utility function to convert a Euclid rect to a Windows rect.
 #[inline]
 pub fn eurect_to_winrect(
-    eurect: euclid::default::Rect<std::os::raw::c_int>,
+    eurect: euclid::default::Rect<cty::c_int>,
 ) -> winapi::shared::windef::RECT {
     winapi::shared::windef::RECT {
         left: eurect.origin.x,
@@ -98,8 +115,9 @@ pub fn eurect_to_winrect(
     }
 }
 
+use cty::c_int;
 use euclid::default::Point2D;
-use std::{mem::MaybeUninit, os::raw::c_int};
+use maybe_uninit::MaybeUninit;
 use winapi::shared::windef::POINT;
 
 /// Get the current location of the mouse cursor on screen.

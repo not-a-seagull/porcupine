@@ -43,17 +43,14 @@
  * ----------------------------------------------------------------------------------
  */
 
-use crate::{Bitmap, GenericWindow, WeakWindow};
+use alloc::sync::Weak;
+use crate::{Bitmap, GenericWindow, WeakWindow, mutexes::Mutex};
+use core::{option::Option, ptr::{self, NonNull}, sync::atomic::AtomicPtr};
+use cty::c_int;
 use euclid::default::{Point2D, Rect};
-use parking_lot::Mutex;
-use std::{
-    ffi::c_void,
-    mem::MaybeUninit,
-    os::raw::c_int,
-    ptr::{self, NonNull},
-    sync::{atomic::AtomicPtr, Weak},
-};
+use maybe_uninit::MaybeUninit;
 use winapi::{
+    ctypes::c_void,
     shared::{
         minwindef::DWORD,
         windef::{HBITMAP__, HDC__},
@@ -140,7 +137,7 @@ pub enum CopyOperation {
 impl DeviceContext {
     /// Start painting with a new DC.
     pub fn begin_paint<T: GenericWindow + ?Sized>(hwnd: &T) -> crate::Result<Self> {
-        let mut ps: MaybeUninit<PAINTSTRUCT> = MaybeUninit::zeroed();
+        let mut ps: MaybeUninit<PAINTSTRUCT> = MaybeUninit::uninit();
         let hdc = unsafe { winuser::BeginPaint(hwnd.hwnd().as_mut(), ps.as_mut_ptr()) };
 
         if hdc.is_null() {
@@ -201,11 +198,15 @@ impl DeviceContext {
     }
 
     /// Get a handle to this DC.
-    pub fn hdc(&self) -> NonNull<HDC__> {
+    ///
+    /// # Safety
+    ///
+    /// This copies the pointer out of the AtomicPtr and is thus unsound.
+    pub unsafe fn hdc(&self) -> NonNull<HDC__> {
         let mut p = self.hdc.lock();
         let ptr = *p.get_mut();
         debug_assert!(!ptr.is_null());
-        unsafe { NonNull::new_unchecked(ptr) }
+        NonNull::new_unchecked(ptr)
     }
 
     /// Copy data from one DC to another, using BitBlt.

@@ -43,8 +43,8 @@
  * ----------------------------------------------------------------------------------
  */
 
-use std::{convert::Infallible, fmt, ptr, string::FromUtf8Error};
-use thiserror::Error;
+use alloc::{string::{FromUtf8Error, String, ToString}, vec::Vec};
+use core::{fmt, ptr};
 use winapi::{
     shared::minwindef::DWORD,
     um::{errhandlingapi, winbase::*},
@@ -135,35 +135,21 @@ impl fmt::Display for Win32Function {
 }
 
 /// The error used by the Porcupine API.
-#[derive(Debug, Error, Clone)]
+#[derive(Debug, Clone)]
 pub enum Error {
-    #[error("This error should not have been able to possibly occur.")]
     Unreachable,
-    #[error("{0}")]
     StaticMsg(&'static str),
     /// A Win32 error occured.
-    #[error("A windows error occurred while running {function}: {message} (Code {code})")]
     Win32 {
         code: DWORD,
         message: String,
         function: Win32Function,
     },
-    #[error("Unable to convert UTF-8 to Rust string: {0}")]
-    Utf8(#[from] FromUtf8Error),
-
+    Utf8(FromUtf8Error),
     /// Attempted to upgrade a dead Weak pointer.
-    #[error("Attempted to upgrade a weak pointer that has since expired")]
     ExpiredWeakPtr,
-    #[error("Attempted to set storage on a non-owning device context")]
     NoGDIStorage,
-    #[error("Attempted to set storage on a device context that already owned storage")]
     AlreadyHadGDIStorage,
-}
-
-impl From<Infallible> for Error {
-    fn from(_i: Infallible) -> Error {
-        Error::Unreachable
-    }
 }
 
 impl From<Error> for fmt::Error {
@@ -172,8 +158,14 @@ impl From<Error> for fmt::Error {
     }
 }
 
+impl From<FromUtf8Error> for Error {
+    fn from(futf8: FromUtf8Error) -> Self {
+        Self::Utf8(futf8)
+    }
+}
+
 /// A result, for conveinence.
-pub type Result<T> = std::result::Result<T, Error>;
+pub type Result<T> = core::result::Result<T, Error>;
 
 /// Get the last Win32 error, if applicable.
 pub fn win32_error(function: Win32Function) -> Error {

@@ -43,17 +43,14 @@
  * ----------------------------------------------------------------------------------
  */
 
-use crate::DeviceContext;
+use crate::{DeviceContext, mutexes::Mutex};
+use alloc::sync::{Arc, Weak};
+use core::{mem, ptr::NonNull, sync::atomic::AtomicPtr};
+use cty::{c_int, c_long};
 use euclid::default::Size2D;
-use parking_lot::Mutex;
-use std::{
-    ffi::c_void,
-    mem::{self, MaybeUninit},
-    os::raw::{c_int, c_long},
-    ptr::NonNull,
-    sync::{atomic::AtomicPtr, Arc, Weak},
-};
+use maybe_uninit::MaybeUninit;
 use winapi::{
+    ctypes::c_void,
     shared::{minwindef::BYTE, windef::HBITMAP__},
     um::wingdi::{self, BITMAP},
 };
@@ -63,7 +60,7 @@ static OWNING_DC_NONE: &'static str = "Owning DC was not properly set";
 /// A bitmap.
 pub struct Bitmap {
     hbitmap: Arc<Mutex<AtomicPtr<HBITMAP__>>>,
-    owning_dc: Option<DeviceContext>, // only for initialization. This field should never be None
+    owning_dc: Option<DeviceContext>, // Option only for initialization. This field should never be None
     bm: BITMAP,
 }
 
@@ -126,16 +123,20 @@ impl Bitmap {
     }
 
     /// Get the handle to a bitmap.
-    pub fn hbitmap(&self) -> NonNull<HBITMAP__> {
+    ///
+    /// # Safety
+    ///
+    /// This copies the handle out of an AtomicPtr and is thus unsound.
+    pub unsafe fn hbitmap(&self) -> NonNull<HBITMAP__> {
         let mut p = self.hbitmap.lock();
         let ptr = *p.get_mut();
         debug_assert!(!ptr.is_null());
-        unsafe { NonNull::new_unchecked(ptr) }
+        NonNull::new_unchecked(ptr)
     }
 
     /// Get the internal device context.
     pub fn dc(&self) -> &DeviceContext {
-        self.owning_dc.as_ref().unwrap()
+        self.owning_dc.as_ref().expect(OWNING_DC_NONE)
     }
 
     /// Get the width of the internal image.

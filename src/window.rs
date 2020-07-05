@@ -43,20 +43,21 @@
  * ----------------------------------------------------------------------------------
  */
 
-use crate::DeviceContext;
-use euclid::default::{Point2D, Rect};
-use parking_lot::Mutex;
-use std::{
+use alloc::{boxed::Box, format, string::String, sync::{Arc, Weak}};
+use crate::{DeviceContext, mutexes::Mutex};
+use core::{
     any::Any,
     convert::TryInto,
-    ffi::c_void,
     fmt,
-    mem::{self, MaybeUninit},
-    os::raw::c_int,
+    mem,
     ptr::{self, NonNull},
-    sync::{atomic::AtomicPtr, Arc, Weak},
+    sync::atomic::AtomicPtr,
 };
+use cty::c_int;
+use euclid::default::{Point2D, Rect};
+use maybe_uninit::MaybeUninit;
 use winapi::{
+    ctypes::c_void,
     shared::{
         basetsd::LONG_PTR,
         minwindef::{DWORD, FALSE, TRUE, UINT},
@@ -427,17 +428,17 @@ pub trait GenericWindow {
 }
 
 #[inline]
-fn get_hwnd(a: &Arc<Mutex<AtomicPtr<HWND__>>>) -> NonNull<HWND__> {
+unsafe fn get_hwnd(a: &Arc<Mutex<AtomicPtr<HWND__>>>) -> NonNull<HWND__> {
     let mut p = a.lock();
     let ptr = p.get_mut();
     debug_assert!(!ptr.is_null());
-    unsafe { NonNull::new_unchecked(*ptr) }
+    NonNull::new_unchecked(*ptr)
 }
 
 impl GenericWindow for Window {
     fn hwnd(&self) -> NonNull<HWND__> {
         // TODO: this might be unsound. check it later.
-        get_hwnd(&self.hwnd)
+        unsafe { get_hwnd(&self.hwnd) }
     }
 
     fn weak_reference(&self) -> WeakWindow {
@@ -449,7 +450,7 @@ impl GenericWindow for Window {
 
 impl GenericWindow for DroplessWindow {
     fn hwnd(&self) -> NonNull<HWND__> {
-        get_hwnd(&self.hwnd)
+        unsafe { get_hwnd(&self.hwnd) }
     }
 
     fn weak_reference(&self) -> WeakWindow {
@@ -466,7 +467,7 @@ impl GenericWindow for WeakWindow {
             .upgrade()
             .expect("Unable to upgrade weak window into strong window.");
 
-        get_hwnd(&upgraded)
+        unsafe { get_hwnd(&upgraded) }
     }
 
     fn weak_reference(&self) -> WeakWindow {

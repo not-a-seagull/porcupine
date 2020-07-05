@@ -43,7 +43,7 @@
  * ----------------------------------------------------------------------------------
  */
 
-use std::mem;
+use core::mem;
 use winapi::{
     shared::minwindef::{DWORD, FALSE},
     um::commctrl::*,

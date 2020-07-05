@@ -44,14 +44,15 @@
  */
 
 // just re-export MSG
-use std::{cmp::Ordering, mem::MaybeUninit, ptr};
+use core::{cmp::Ordering, ptr};
+use maybe_uninit::MaybeUninit;
 use winapi::um::winuser;
 pub use winapi::um::winuser::MSG;
 
 /// Get a message from the Win32 event loop.
 #[inline]
 pub fn get_message() -> crate::Result<Option<MSG>> {
-    let mut m: MaybeUninit<MSG> = MaybeUninit::zeroed();
+    let mut m: MaybeUninit<MSG> = MaybeUninit::uninit();
 
     match unsafe { winuser::GetMessageA(m.as_mut_ptr(), ptr::null_mut(), 0, 0) }.cmp(&0) {
         Ordering::Greater => {

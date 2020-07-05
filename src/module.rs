@@ -43,11 +43,11 @@
  * ----------------------------------------------------------------------------------
  */
 
-use parking_lot::Mutex;
-use std::{
+use crate::mutexes::Mutex;
+use core::{
     fmt,
     ptr::{self, NonNull},
-    sync::{atomic::AtomicPtr, Arc},
+    sync::atomic::AtomicPtr,
 };
 use winapi::{
     shared::minwindef::{HINSTANCE__, HMODULE},
@@ -96,6 +96,6 @@ impl Drop for ModuleInfo {
 }
 
 lazy_static::lazy_static! {
-    pub static ref MODULE_INFO: Arc<Mutex<ModuleInfo>> =
-        Arc::new(Mutex::new(ModuleInfo::new().expect("Unable to create module info")));
+    pub static ref MODULE_INFO: Mutex<ModuleInfo> =
+        Mutex::new(ModuleInfo::new().expect("Unable to create module info"));
 }
