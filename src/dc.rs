@@ -43,7 +43,7 @@
  * ----------------------------------------------------------------------------------
  */
 
-use crate::{mutexes::Mutex, Bitmap, GenericWindow, WeakWindow};
+use crate::{mutexes::Mutex, Bitmap, Brush, GenericWindow, Pen, WeakWindow};
 use alloc::sync::Weak;
 use core::{
     option::Option,
@@ -172,6 +172,20 @@ impl DeviceContext {
                 },
             })
         }
+    }
+
+    /// Set the pen for this DC.
+    #[inline]
+    pub fn set_pen(&self, pen: &Pen) {
+        unsafe { wingdi::SelectObject(self.hdc().as_mut(), pen.hpen().as_ptr() as *mut c_void) };
+    }
+
+    /// Set the brush for this DC.
+    #[inline]
+    pub fn set_brush(&self, brush: &Brush) {
+        unsafe {
+            wingdi::SelectObject(self.hdc().as_mut(), brush.hbrush().as_ptr() as *mut c_void)
+        };
     }
 
     /// Turn a compatible DC into a bitmap DC.
