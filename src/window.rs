@@ -424,6 +424,12 @@ pub trait GenericWindow {
         }
     }
 
+    /// Send a paint event to this window.
+    #[inline]
+    fn repaint(&self) {
+        unsafe { winuser::SendMessageA(self.hwnd().as_mut(), winuser::WM_PAINT, 0, 0) };
+    }
+
     /// Begin painting ops on this window.
     #[inline]
     fn begin_paint(&self) -> crate::Result<DeviceContext> {
