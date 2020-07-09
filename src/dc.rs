@@ -43,9 +43,13 @@
  * ----------------------------------------------------------------------------------
  */
 
+use crate::{mutexes::Mutex, Bitmap, GenericWindow, WeakWindow};
 use alloc::sync::Weak;
-use crate::{Bitmap, GenericWindow, WeakWindow, mutexes::Mutex};
-use core::{option::Option, ptr::{self, NonNull}, sync::atomic::AtomicPtr};
+use core::{
+    option::Option,
+    ptr::{self, NonNull},
+    sync::atomic::AtomicPtr,
+};
 use cty::c_int;
 use euclid::default::{Point2D, Rect};
 use maybe_uninit::MaybeUninit;

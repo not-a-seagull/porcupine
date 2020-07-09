@@ -43,13 +43,17 @@
  * ----------------------------------------------------------------------------------
  */
 
-use alloc::{boxed::Box, format, string::String, sync::{Arc, Weak}};
-use crate::{DeviceContext, mutexes::Mutex};
+use crate::{mutexes::Mutex, DeviceContext};
+use alloc::{
+    boxed::Box,
+    format,
+    string::String,
+    sync::{Arc, Weak},
+};
 use core::{
     any::Any,
     convert::TryInto,
-    fmt,
-    mem,
+    fmt, mem,
     ptr::{self, NonNull},
     sync::atomic::AtomicPtr,
 };

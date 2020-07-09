@@ -54,9 +54,9 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 #[cfg(feature = "std")]
-extern crate std as core;
-#[cfg(feature = "std")]
 extern crate std as alloc;
+#[cfg(feature = "std")]
+extern crate std as core;
 pub extern crate winapi;
 
 pub use winapi::{
@@ -70,6 +70,7 @@ pub use winapi::{
 pub mod bitmap;
 pub mod commctrl;
 pub mod dc;
+pub mod draw;
 mod error;
 pub mod module;
 pub mod msg;
@@ -78,6 +79,7 @@ pub mod window;
 pub use bitmap::*;
 pub use commctrl::*;
 pub use dc::*;
+pub use draw::*;
 pub use error::*;
 pub use module::*;
 pub use msg::*;

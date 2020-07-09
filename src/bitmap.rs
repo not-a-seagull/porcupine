@@ -43,7 +43,7 @@
  * ----------------------------------------------------------------------------------
  */
 
-use crate::{DeviceContext, mutexes::Mutex};
+use crate::{mutexes::Mutex, DeviceContext};
 use alloc::sync::{Arc, Weak};
 use core::{mem, ptr::NonNull, sync::atomic::AtomicPtr};
 use cty::{c_int, c_long};

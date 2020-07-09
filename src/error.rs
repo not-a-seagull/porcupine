@@ -43,7 +43,10 @@
  * ----------------------------------------------------------------------------------
  */
 
-use alloc::{string::{FromUtf8Error, String, ToString}, vec::Vec};
+use alloc::{
+    string::{FromUtf8Error, String, ToString},
+    vec::Vec,
+};
 use core::{fmt, ptr};
 use winapi::{
     shared::minwindef::DWORD,
@@ -86,6 +89,8 @@ pub enum Win32Function {
     GetWindowLongPtrA,
     ScreenToClient,
     GetCursorPos,
+    CreatePen,
+    CreateBrush,
     Other(&'static str),
 }
 
@@ -95,6 +100,8 @@ impl fmt::Display for Win32Function {
             f,
             "{}",
             match *self {
+                Self::CreatePen => "CreatePen",
+                Self::CreateBrush => "CreateBrush",
                 Self::GetCursorPos => "GetCursorPos",
                 Self::ScreenToClient => "ScreenToClient",
                 Self::GetWindowLongPtrA => "GetWindowLongPtrA",
