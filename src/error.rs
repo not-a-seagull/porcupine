@@ -159,6 +159,27 @@ pub enum Error {
     AlreadyHadGDIStorage,
 }
 
+impl fmt::Display for Error {
+    #[inline]
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Error::Unreachable => f.pad("This error should not have been able to be reached"),
+            Error::StaticMsg(s) => f.pad(s),
+            Error::Win32 {
+                code,
+                message,
+                function,
+            } => write!(f, "{} threw error code {}: {}", function, code, message),
+            Error::Utf8(u) => fmt::Display::fmt(u, f),
+            Error::ExpiredWeakPtr => f.pad("Attempted to upgrade a dead Weak pointer"),
+            Error::NoGDIStorage => f.pad("No GDI storage was found in the device context"),
+            Error::AlreadyHadGDIStorage => {
+                f.pad("GDI storage already exists within the device context")
+            }
+        }
+    }
+}
+
 impl From<Error> for fmt::Error {
     fn from(_f: Error) -> Self {
         Self
